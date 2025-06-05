@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 // Load configuration
-$config = require_once __DIR__ . '/config/config.php';
+$config = require_once './config/config.php';
 
 if (empty($config['api_key'])) {
     echo "❌ Error: OpenAI API key not found. Please check your .env file\n";
