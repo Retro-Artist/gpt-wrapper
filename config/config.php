@@ -5,8 +5,11 @@
  * Environment variables are loaded from .env file
  */
 
-// Load environment variables
-require_once __DIR__ . '/load_env.php';
+// Load environment variables (only if not already loaded)
+if (!function_exists('loadEnv')) {
+    require_once __DIR__ . '/load_env.php';
+}
+
 $envLoaded = loadEnv(__DIR__ . '/../.env');
 
 if (!$envLoaded) {
@@ -22,25 +25,27 @@ $temperature = (float)(getenv('OPENAI_TEMPERATURE') ?: 0.7);
 // Get Database values from environment variables with fallbacks
 $dbHost = getenv('DB_HOST') ?: 'localhost';
 $dbPort = (int)(getenv('DB_PORT') ?: 3306);
-$dbDatabase = getenv('DB_DATABASE') ?: 'ai_php';
+$dbDatabase = getenv('DB_DATABASE') ?: 'simple_php';
 $dbUsername = getenv('DB_USERNAME') ?: 'root';
 $dbPassword = getenv('DB_PASSWORD') ?: '';
 
-// Database connection function
-function getDatabaseConnection() {
-    global $dbHost, $dbPort, $dbDatabase, $dbUsername, $dbPassword;
-    
-    try {
-        $dsn = "mysql:host={$dbHost};port={$dbPort};dbname={$dbDatabase};charset=utf8mb4";
-        $pdo = new PDO($dsn, $dbUsername, $dbPassword, [
-            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-            PDO::ATTR_EMULATE_PREPARES => false,
-        ]);
-        return $pdo;
-    } catch (PDOException $e) {
-        error_log("Database connection failed: " . $e->getMessage());
-        return null;
+// Database connection function (only define if not already exists)
+if (!function_exists('getDatabaseConnection')) {
+    function getDatabaseConnection() {
+        global $dbHost, $dbPort, $dbDatabase, $dbUsername, $dbPassword;
+        
+        try {
+            $dsn = "mysql:host={$dbHost};port={$dbPort};dbname={$dbDatabase};charset=utf8mb4";
+            $pdo = new PDO($dsn, $dbUsername, $dbPassword, [
+                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                PDO::ATTR_EMULATE_PREPARES => false,
+            ]);
+            return $pdo;
+        } catch (PDOException $e) {
+            error_log("Database connection failed: " . $e->getMessage());
+            return null;
+        }
     }
 }
 
