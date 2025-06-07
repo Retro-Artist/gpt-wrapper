@@ -11,6 +11,25 @@ abstract class Tool {
      * Get the OpenAI function definition for this tool
      */
     public function getOpenAIDefinition(): array {
+        $schema = $this->getParametersSchema();
+        $required = [];
+        
+        // Extract required parameters correctly
+        foreach ($schema as $paramName => $paramConfig) {
+            if (isset($paramConfig['required']) && $paramConfig['required'] === true) {
+                $required[] = $paramName;
+            }
+        }
+        
+        // Clean the schema - remove the 'required' field from individual parameters
+        $cleanSchema = [];
+        foreach ($schema as $paramName => $paramConfig) {
+            $cleanSchema[$paramName] = [
+                'type' => $paramConfig['type'],
+                'description' => $paramConfig['description']
+            ];
+        }
+        
         return [
             'type' => 'function',
             'function' => [
@@ -18,8 +37,8 @@ abstract class Tool {
                 'description' => $this->getDescription(),
                 'parameters' => [
                     'type' => 'object',
-                    'properties' => $this->getParametersSchema(),
-                    'required' => $this->getRequiredParameters()
+                    'properties' => $cleanSchema,
+                    'required' => $required
                 ]
             ]
         ];

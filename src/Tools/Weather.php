@@ -62,7 +62,11 @@ class Weather extends Tool {
             'new york' => ['temp' => 22, 'condition' => 'Partly Cloudy', 'humidity' => 65],
             'sydney' => ['temp' => 25, 'condition' => 'Sunny', 'humidity' => 60],
             'moscow' => ['temp' => 5, 'condition' => 'Snow', 'humidity' => 85],
-            'russia' => ['temp' => 2, 'condition' => 'Cold', 'humidity' => 90]
+            'russia' => ['temp' => 2, 'condition' => 'Cold', 'humidity' => 90],
+            'amsterdam' => ['temp' => 12, 'condition' => 'Rainy', 'humidity' => 85],
+            'berlin' => ['temp' => 16, 'condition' => 'Overcast', 'humidity' => 75],
+            'madrid' => ['temp' => 24, 'condition' => 'Sunny', 'humidity' => 45],
+            'rome' => ['temp' => 26, 'condition' => 'Clear', 'humidity' => 50]
         ];
         
         $locationKey = strtolower($location);
@@ -107,6 +111,7 @@ class Weather extends Tool {
             'temperature' => round($temp, 1) . $unitSymbol,
             'condition' => $weather['condition'],
             'humidity' => $weather['humidity'] . '%',
+            'description' => "Current weather in {$location}: {$weather['condition']}, " . round($temp, 1) . $unitSymbol . ", {$weather['humidity']}% humidity",
             'last_updated' => date('Y-m-d H:i:s')
         ];
     }

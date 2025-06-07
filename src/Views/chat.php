@@ -58,7 +58,7 @@ ob_start();
                         <!-- Agent Selection -->
                         <?php if (!empty($availableAgents)): ?>
                         <div class="flex items-center space-x-2">
-                            <label for="agent-select" class="text-sm text-gray-500">Agent:</label>
+                            <label for="agent-select" class="text-sm text-gray-500">Test Specific Agent:</label>
                             <select id="agent-select" class="text-sm border border-gray-300 rounded px-2 py-1 focus:ring-primary-500 focus:border-primary-500">
                                 <option value="">Default Assistant</option>
                                 <?php foreach ($availableAgents as $agent): ?>

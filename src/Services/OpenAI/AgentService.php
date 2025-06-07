@@ -31,6 +31,12 @@ class AgentService {
         
         // Prepare tools for OpenAI
         $tools = $this->prepareTools($agent->getTools());
+        error_log("AgentService: Prepared " . count($tools) . " tools for agent execution");
+        
+        // Log the tools schema for debugging
+        if (!empty($tools)) {
+            error_log("AgentService: Tools schema: " . json_encode($tools, JSON_PRETTY_PRINT));
+        }
         
         // Prepare messages for OpenAI
         $conversationMessages = [
@@ -69,7 +75,15 @@ class AgentService {
         if (!empty($tools)) {
             $payload['tools'] = $tools;
             $payload['tool_choice'] = 'auto';
+            error_log("AgentService: Added tools to payload");
         }
+        
+        error_log("AgentService: Making OpenAI API call with payload: " . json_encode([
+            'model' => $payload['model'],
+            'message_count' => count($payload['messages']),
+            'tools_count' => count($tools),
+            'has_tools' => !empty($tools)
+        ]));
         
         // Make initial API call
         $response = $this->callOpenAIAPI($payload);
@@ -78,6 +92,8 @@ class AgentService {
         $assistantMessage = $response['choices'][0]['message'];
         
         if (isset($assistantMessage['tool_calls'])) {
+            error_log("AgentService: Agent requested " . count($assistantMessage['tool_calls']) . " tool calls");
+            
             // Execute tool calls
             $toolResults = $this->executeToolCalls($assistantMessage['tool_calls']);
             
@@ -99,6 +115,7 @@ class AgentService {
             
             return $finalResponse['choices'][0]['message']['content'];
         } else {
+            error_log("AgentService: No tools requested, returning direct response");
             // No tools needed, return response directly
             return $assistantMessage['content'];
         }
@@ -121,8 +138,15 @@ class AgentService {
                     
                     if (class_exists($toolClassName)) {
                         $tool = new $toolClassName();
-                        $tools[] = $tool->getOpenAIDefinition();
-                        error_log("AgentService: Tool class instantiated: $toolClassName");
+                        $toolDefinition = $tool->getOpenAIDefinition();
+                        
+                        // Validate the tool definition before adding it
+                        if ($this->validateToolDefinition($toolDefinition)) {
+                            $tools[] = $toolDefinition;
+                            error_log("AgentService: Tool definition validated and added: $toolClassName");
+                        } else {
+                            error_log("AgentService: Tool definition validation failed for: $toolClassName");
+                        }
                     } else {
                         error_log("AgentService: Tool class not found: $toolClassName");
                     }
@@ -135,8 +159,45 @@ class AgentService {
             }
         }
         
-        error_log("AgentService: Prepared " . count($tools) . " tools");
+        error_log("AgentService: Successfully prepared " . count($tools) . " tools");
         return $tools;
+    }
+    
+    private function validateToolDefinition($toolDefinition) {
+        // Basic validation of tool definition structure
+        if (!isset($toolDefinition['type']) || $toolDefinition['type'] !== 'function') {
+            error_log("AgentService: Tool definition missing or invalid type");
+            return false;
+        }
+        
+        if (!isset($toolDefinition['function']['name'])) {
+            error_log("AgentService: Tool definition missing function name");
+            return false;
+        }
+        
+        if (!isset($toolDefinition['function']['description'])) {
+            error_log("AgentService: Tool definition missing function description");
+            return false;
+        }
+        
+        if (!isset($toolDefinition['function']['parameters'])) {
+            error_log("AgentService: Tool definition missing parameters");
+            return false;
+        }
+        
+        $parameters = $toolDefinition['function']['parameters'];
+        if (!isset($parameters['type']) || $parameters['type'] !== 'object') {
+            error_log("AgentService: Tool parameters type must be 'object'");
+            return false;
+        }
+        
+        if (isset($parameters['required']) && !is_array($parameters['required'])) {
+            error_log("AgentService: Tool parameters 'required' must be an array, got: " . gettype($parameters['required']));
+            return false;
+        }
+        
+        error_log("AgentService: Tool definition validation passed");
+        return true;
     }
     
     private function executeToolCalls($toolCalls) {
@@ -147,6 +208,8 @@ class AgentService {
                 $toolName = $toolCall['function']['name'];
                 $parameters = json_decode($toolCall['function']['arguments'], true);
                 
+                error_log("AgentService: Executing tool call: $toolName with parameters: " . json_encode($parameters));
+                
                 // Load and execute the tool
                 $result = $this->executeTool($toolName, $parameters);
                 
@@ -156,7 +219,11 @@ class AgentService {
                     'result' => $result
                 ];
                 
+                error_log("AgentService: Tool execution successful for: $toolName");
+                
             } catch (Exception $e) {
+                error_log("AgentService: Tool execution failed for {$toolCall['function']['name']}: " . $e->getMessage());
+                
                 $results[] = [
                     'tool_call_id' => $toolCall['id'],
                     'tool_name' => $toolCall['function']['name'] ?? 'unknown',
@@ -225,6 +292,7 @@ class AgentService {
         // Parse JSON response
         $decoded = json_decode($response, true);
         if (json_last_error() !== JSON_ERROR_NONE) {
+            error_log("AgentService: JSON parse error. Raw response: " . substr($response, 0, 1000));
             throw new Exception('JSON parse error: ' . json_last_error_msg());
         }
         
@@ -233,6 +301,8 @@ class AgentService {
             $errorMessage = isset($decoded['error']['message']) 
                 ? $decoded['error']['message'] 
                 : "HTTP error: $httpCode";
+            
+            error_log("AgentService: OpenAI API error (HTTP $httpCode): " . json_encode($decoded));
             throw new Exception("OpenAI API error: " . $errorMessage);
         }
         
