@@ -1,5 +1,8 @@
 <?php
-// src/Router.php
+/**
+ * Application Router
+ * Handles web and API routes with the new structure
+ */
 
 class Router {
     private $routes = [];
@@ -24,6 +27,9 @@ class Router {
     }
     
     public function handleRequest() {
+        // Log the request
+        Logger::getInstance()->logRequest();
+        
         $method = $_SERVER['REQUEST_METHOD'];
         $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
         
@@ -32,18 +38,20 @@ class Router {
             $path = rtrim($path, '/');
         }
         
+        // Apply global security
+        $this->applyGlobalSecurity();
+        
         // Debug logging for API routes
-        if (strpos($path, '/api/') === 0) {
-            error_log("Router Debug: Method=$method, Path=$path");
+        if (strpos($path, '/api/') === 0 && config('app.debug')) {
+            logger("Router: Method=$method, Path=$path");
         }
         
         foreach ($this->routes as $route) {
             if ($this->matchRoute($route, $method, $path)) {
-                // Debug logging for matched routes
-                if (strpos($path, '/api/') === 0) {
-                    error_log("Router Debug: Matched route pattern: " . $route['path']);
-                    if (isset($this->routeParameters)) {
-                        error_log("Router Debug: Parameters: " . json_encode($this->routeParameters));
+                if (strpos($path, '/api/') === 0 && config('app.debug')) {
+                    logger("Router: Matched route pattern: " . $route['path']);
+                    if (!empty($this->routeParameters)) {
+                        logger("Router: Parameters: " . json_encode($this->routeParameters));
                     }
                 }
                 $this->callHandler($route);
@@ -52,17 +60,27 @@ class Router {
         }
         
         // Debug logging for 404s
-        if (strpos($path, '/api/') === 0) {
-            error_log("Router Debug: No route found for $method $path");
-            error_log("Router Debug: Available routes:");
-            foreach ($this->routes as $route) {
-                if ($route['type'] === 'api') {
-                    error_log("  " . $route['method'] . " " . $route['path']);
-                }
-            }
+        if (strpos($path, '/api/') === 0 && config('app.debug')) {
+            logger("Router: No route found for $method $path");
         }
         
         $this->handle404();
+    }
+    
+    private function applyGlobalSecurity() {
+        // Set security headers
+        security()->setSecurityHeaders();
+        
+        // Initialize secure session
+        security()->initializeSecureSession();
+        
+        // Rate limiting for all requests
+        checkRateLimit();
+        
+        // CSRF protection for POST requests
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            requireCSRF();
+        }
     }
     
     private function matchRoute($route, $method, $path) {
@@ -83,20 +101,9 @@ class Router {
         $pattern = preg_replace('/\{[^}]+\}/', '([^/]+)', $routePath);
         $pattern = '#^' . $pattern . '$#';
         
-        // Debug the pattern matching
-        if (strpos($path, '/api/') === 0) {
-            error_log("Router Debug: Testing pattern '$pattern' against path '$path'");
-        }
-        
         if (preg_match($pattern, $path, $matches)) {
             // Store parameters for later use
             $this->routeParameters = array_slice($matches, 1);
-            
-            // Debug the parameters
-            if (strpos($path, '/api/') === 0) {
-                error_log("Router Debug: Pattern matched! Parameters: " . json_encode($this->routeParameters));
-            }
-            
             return true;
         }
         
@@ -107,49 +114,47 @@ class Router {
         list($controllerName, $methodName) = explode('@', $route['handler']);
         
         // Determine controller directory based on route type
-        $directory = $route['type'] === 'api' ? 'Api' : 'Web';
-        $controllerFile = __DIR__ . "/Controllers/{$directory}/{$controllerName}.php";
+        if ($route['type'] === 'api') {
+            $controllerFile = __DIR__ . "/../API/{$controllerName}.php";
+        } else {
+            $controllerFile = __DIR__ . "/../Web/Controllers/{$controllerName}.php";
+        }
         
         if (!file_exists($controllerFile)) {
-            $this->handle404("Controller file not found: {$controllerFile}");
-            return;
+            throw new Exception("Controller file not found: {$controllerFile}");
         }
         
         require_once $controllerFile;
         
         if (!class_exists($controllerName)) {
-            $this->handle404("Controller class not found: {$controllerName}");
-            return;
+            throw new Exception("Controller class not found: {$controllerName}");
         }
         
         $controller = new $controllerName();
         
         if (!method_exists($controller, $methodName)) {
-            $this->handle404("Method not found: {$controllerName}@{$methodName}");
-            return;
+            throw new Exception("Method not found: {$controllerName}@{$methodName}");
         }
         
         // Call method with route parameters
-        if (isset($this->routeParameters) && !empty($this->routeParameters)) {
+        if (!empty($this->routeParameters)) {
             call_user_func_array([$controller, $methodName], $this->routeParameters);
         } else {
             $controller->$methodName();
         }
     }
     
-    private function handle404($message = "Page not found") {
+    private function handle404() {
         http_response_code(404);
         
         // Check if this is an API request
-        $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-        if (strpos($path, '/api/') === 0) {
-            header('Content-Type: application/json');
-            echo json_encode(['error' => 'Not found']);
+        if (isApiRequest()) {
+            jsonError('Not found', 404);
         } else {
-            echo "<h1>404 - Page Not Found</h1>";
-            if ($_ENV['SYSTEM_DEBUG'] ?? false) {
-                echo "<p>Debug: {$message}</p>";
-            }
+            view('error', [
+                'title' => '404 - Page Not Found',
+                'message' => 'The page you are looking for could not be found.'
+            ]);
         }
         exit;
     }

@@ -1,5 +1,8 @@
 <?php
-// src/Models/Agent.php
+/**
+ * Agent Model
+ * Handles AI agent instances and execution
+ */
 
 class Agent {
     private $id;
@@ -9,19 +12,16 @@ class Agent {
     private $tools = [];
     private $userId;
     private $isActive;
-    private $pdo;
     
     public function __construct($name, $instructions, $model = 'gpt-4o-mini') {
         $this->name = $name;
         $this->instructions = $instructions;
         $this->model = $model;
-        $this->userId = $_SESSION['user_id'] ?? null;
+        $this->userId = currentUserId();
         $this->isActive = true;
-        $this->pdo = getDatabaseConnection();
     }
     
     public function addTool($toolClassName) {
-        // Store just the class name for simplicity
         $this->tools[] = $toolClassName;
         return $this; // For method chaining
     }
@@ -49,44 +49,31 @@ class Agent {
     public function save() {
         if ($this->id) {
             // Update existing agent
-            $stmt = $this->pdo->prepare("
-                UPDATE agents 
-                SET name = ?, instructions = ?, model = ?, tools = ?, is_active = ?, updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            ");
-            $stmt->execute([
-                $this->name,
-                $this->instructions, 
-                $this->model,
-                json_encode($this->tools),
-                $this->isActive,
-                $this->id
-            ]);
+            return dbUpdate('agents', [
+                'name' => $this->name,
+                'instructions' => $this->instructions,
+                'model' => $this->model,
+                'tools' => json_encode($this->tools),
+                'is_active' => $this->isActive,
+                'updated_at' => date('Y-m-d H:i:s')
+            ], 'id = ?', [$this->id]);
         } else {
             // Create new agent
-            $stmt = $this->pdo->prepare("
-                INSERT INTO agents (name, instructions, model, tools, user_id, is_active) 
-                VALUES (?, ?, ?, ?, ?, ?)
-            ");
-            $stmt->execute([
-                $this->name,
-                $this->instructions,
-                $this->model,
-                json_encode($this->tools),
-                $this->userId,
-                $this->isActive
+            $this->id = dbInsert('agents', [
+                'name' => $this->name,
+                'instructions' => $this->instructions,
+                'model' => $this->model,
+                'tools' => json_encode($this->tools),
+                'user_id' => $this->userId,
+                'is_active' => $this->isActive
             ]);
-            $this->id = $this->pdo->lastInsertId();
         }
         
         return $this;
     }
     
     public static function findById($agentId) {
-        $pdo = getDatabaseConnection();
-        $stmt = $pdo->prepare("SELECT * FROM agents WHERE id = ?");
-        $stmt->execute([$agentId]);
-        $data = $stmt->fetch(PDO::FETCH_ASSOC);
+        $data = dbQueryOne("SELECT * FROM agents WHERE id = ?", [$agentId]);
         
         if (!$data) {
             return null;
@@ -96,33 +83,14 @@ class Agent {
     }
     
     public static function getUserAgents($userId) {
-        $pdo = getDatabaseConnection();
-        $stmt = $pdo->prepare("
+        $results = dbQuery("
             SELECT * FROM agents 
             WHERE user_id = ? AND is_active = true 
             ORDER BY created_at DESC
-        ");
-        $stmt->execute([$userId]);
+        ", [$userId]);
+        
         $agents = [];
-        
-        while ($data = $stmt->fetch(PDO::FETCH_ASSOC)) {
-            $agents[] = self::fromArray($data);
-        }
-        
-        return $agents;
-    }
-    
-    public static function getAllActiveAgents() {
-        $pdo = getDatabaseConnection();
-        $stmt = $pdo->prepare("
-            SELECT * FROM agents 
-            WHERE is_active = true 
-            ORDER BY name ASC
-        ");
-        $stmt->execute();
-        $agents = [];
-        
-        while ($data = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        foreach ($results as $data) {
             $agents[] = self::fromArray($data);
         }
         
@@ -139,15 +107,16 @@ class Agent {
     }
     
     public function execute($message, $threadId) {
-        require_once __DIR__ . '/../Services/OpenAI/AgentService.php';
+        // Load the AI system
+        require_once __DIR__ . '/../../API/SystemAPI.php';
         
         // Create a run for tracking
         $run = $this->createRun($threadId);
         
         try {
-            // Execute the agent with tools
-            $agentService = new AgentService();
-            $response = $agentService->executeAgent($this, $message, $threadId);
+            // Execute the agent through the system API
+            $systemAPI = new SystemAPI();
+            $response = $systemAPI->executeAgent($this, $message, $threadId);
             
             // Complete the run
             $this->completeRun($run['id'], 'completed', $response);
@@ -162,14 +131,15 @@ class Agent {
     }
     
     private function createRun($threadId) {
-        $stmt = $this->pdo->prepare("
-            INSERT INTO runs (thread_id, agent_id, status, started_at) 
-            VALUES (?, ?, 'in_progress', CURRENT_TIMESTAMP)
-        ");
-        $stmt->execute([$threadId, $this->id]);
+        $runId = dbInsert('runs', [
+            'thread_id' => $threadId,
+            'agent_id' => $this->id,
+            'status' => 'in_progress',
+            'started_at' => date('Y-m-d H:i:s')
+        ]);
         
         return [
-            'id' => $this->pdo->lastInsertId(),
+            'id' => $runId,
             'thread_id' => $threadId,
             'agent_id' => $this->id,
             'status' => 'in_progress'
@@ -177,18 +147,16 @@ class Agent {
     }
     
     private function completeRun($runId, $status, $metadata = null) {
-        $stmt = $this->pdo->prepare("
-            UPDATE runs 
-            SET status = ?, completed_at = CURRENT_TIMESTAMP, metadata = ?
-            WHERE id = ?
-        ");
-        $stmt->execute([$status, json_encode($metadata), $runId]);
+        return dbUpdate('runs', [
+            'status' => $status,
+            'completed_at' => date('Y-m-d H:i:s'),
+            'metadata' => json_encode($metadata)
+        ], 'id = ?', [$runId]);
     }
     
     public function delete() {
         if ($this->id) {
-            $stmt = $this->pdo->prepare("UPDATE agents SET is_active = false WHERE id = ?");
-            $stmt->execute([$this->id]);
+            return dbUpdate('agents', ['is_active' => false], 'id = ?', [$this->id]);
         }
         return $this;
     }
